@@ -27,8 +27,8 @@ class Visit(db.Model):
     __tablename__ = "visits"
 
     id = db.Column(db.Integer, primary_key=True)
-    visited_at = db.Column(db.DateTime, nullable=False)
-    client_ip = db.Column(db.String(64), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False)
+    ip_address = db.Column(db.String(45), nullable=False)
 
 
 with app.app_context():
@@ -38,8 +38,8 @@ with app.app_context():
 @app.route("/hello", methods=["GET"])
 def hello():
     visit = Visit(
-        visited_at=datetime.now(),
-        client_ip=request.remote_addr,
+        timestamp=datetime.utcnow(),
+        ip_address=request.remote_addr,
     )
     db.session.add(visit)
     db.session.commit()
