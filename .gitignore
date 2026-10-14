@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv312/
+venv/
+.env.local
+*.egg-info/
+.DS_Store
+.pytest_cache/
+.buildx/
+lab3/.buildx/
+
