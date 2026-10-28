@@ -1,0 +1,219 @@
+name: lab4
+
+x-healthcheck-python: &healthcheck-python
+  test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"]
+  interval: 2s
+  timeout: 3s
+  start_period: 3s
+  retries: 30
+
+x-search-base: &search-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: lab4-flights:1.0
+  cap_add:
+    - SYS_PTRACE
+  security_opt:
+    - seccomp=unconfined
+  healthcheck: *healthcheck-python
+
+services:
+  db:
+    image: postgres:16
+    container_name: lab4-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flights
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d flights"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lab4-flights:1.0
+    container_name: lab4-seed
+    command: ["python", "-m", "flightsearch.seed"]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/flights
+      SEED_START_DATE: "2026-11-01"
+      SEED_DAYS: "120"
+      OWN_FLIGHTS_PER_DAY: "1500"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  supplier1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lab4-flights:1.0
+    container_name: lab4-supplier1
+    command: ["uvicorn", "supplier.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      SUPPLIER_ID: "S1"
+      MEAN_DELAY_MS: "300"
+      DELAY_SPREAD: "0.30"
+      ERROR_RATE: "0.05"
+      SLOW_RATE: "0.0"
+      SLOW_DELAY_S: "3.0"
+      FLIGHTS_PER_DAY: "500"
+      SUPPLIER_SEED: "0"
+    ports:
+      - "8101:8000"
+    healthcheck: *healthcheck-python
+
+  supplier2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lab4-flights:1.0
+    container_name: lab4-supplier2
+    command: ["uvicorn", "supplier.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      SUPPLIER_ID: "S2"
+      MEAN_DELAY_MS: "500"
+      DELAY_SPREAD: "0.30"
+      ERROR_RATE: "0.05"
+      SLOW_RATE: "0.0"
+      SLOW_DELAY_S: "3.0"
+      FLIGHTS_PER_DAY: "500"
+      SUPPLIER_SEED: "0"
+    ports:
+      - "8102:8000"
+    healthcheck: *healthcheck-python
+
+  supplier3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lab4-flights:1.0
+    container_name: lab4-supplier3
+    command: ["uvicorn", "supplier.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      SUPPLIER_ID: "S3"
+      MEAN_DELAY_MS: "800"
+      DELAY_SPREAD: "0.30"
+      ERROR_RATE: "0.05"
+      SLOW_RATE: "0.1"
+      SLOW_DELAY_S: "3.0"
+      FLIGHTS_PER_DAY: "500"
+      SUPPLIER_SEED: "0"
+    ports:
+      - "8103:8000"
+    healthcheck: *healthcheck-python
+
+  search-sync:
+    <<: *search-base
+    container_name: lab4-search-sync
+    command: ["uvicorn", "flightsearch.api_sync:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@db:5432/flights
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@db:5432/flights
+      SUPPLIER_URLS: http://supplier1:8000,http://supplier2:8000,http://supplier3:8000
+      SUPPLIER_TIMEOUT: "2.0"
+      SUPPLIER_RETRY_DELAY: "0.2"
+      DB_POOL_SIZE: "20"
+      DB_MAX_OVERFLOW: "40"
+      LOG_LEVEL: "WARNING"
+    ports:
+      - "8001:8000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      supplier1:
+        condition: service_healthy
+      supplier2:
+        condition: service_healthy
+      supplier3:
+        condition: service_healthy
+
+  search-asyncdef:
+    <<: *search-base
+    container_name: lab4-search-asyncdef
+    command: ["uvicorn", "flightsearch.api_asyncdef:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@db:5432/flights
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@db:5432/flights
+      SUPPLIER_URLS: http://supplier1:8000,http://supplier2:8000,http://supplier3:8000
+      SUPPLIER_TIMEOUT: "2.0"
+      SUPPLIER_RETRY_DELAY: "0.2"
+      DB_POOL_SIZE: "20"
+      DB_MAX_OVERFLOW: "40"
+      LOG_LEVEL: "WARNING"
+    ports:
+      - "8002:8000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      supplier1:
+        condition: service_healthy
+      supplier2:
+        condition: service_healthy
+      supplier3:
+        condition: service_healthy
+
+  search-async:
+    <<: *search-base
+    container_name: lab4-search-async
+    command: ["uvicorn", "flightsearch.api_async:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@db:5432/flights
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@db:5432/flights
+      SUPPLIER_URLS: http://supplier1:8000,http://supplier2:8000,http://supplier3:8000
+      SUPPLIER_TIMEOUT: "2.0"
+      SUPPLIER_RETRY_DELAY: "0.2"
+      DB_POOL_SIZE: "20"
+      DB_MAX_OVERFLOW: "40"
+      SEARCH_CONCURRENCY: "35"
+      LOG_LEVEL: "WARNING"
+    ports:
+      - "8003:8000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      supplier1:
+        condition: service_healthy
+      supplier2:
+        condition: service_healthy
+      supplier3:
+        condition: service_healthy
+
+  search-process:
+    <<: *search-base
+    container_name: lab4-search-process
+    command: ["uvicorn", "flightsearch.api_process:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DATABASE_URL_SYNC: postgresql+psycopg://postgres:postgres@db:5432/flights
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@db:5432/flights
+      SUPPLIER_URLS: http://supplier1:8000,http://supplier2:8000,http://supplier3:8000
+      SUPPLIER_TIMEOUT: "2.0"
+      SUPPLIER_RETRY_DELAY: "0.2"
+      DB_POOL_SIZE: "20"
+      DB_MAX_OVERFLOW: "40"
+      SEARCH_CONCURRENCY: "35"
+      PROCESS_POOL_WORKERS: "2"
+      LOG_LEVEL: "WARNING"
+    ports:
+      - "8004:8000"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      supplier1:
+        condition: service_healthy
+      supplier2:
+        condition: service_healthy
+      supplier3:
+        condition: service_healthy
+
+volumes:
+  pgdata:

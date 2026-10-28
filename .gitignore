@@ -10,3 +10,6 @@ venv/
 .buildx/
 lab3/.buildx/
 
+
+# отчёты ЛР4 не храним в репозитории
+lab4/report/
