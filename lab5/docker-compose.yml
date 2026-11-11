@@ -1,0 +1,109 @@
+name: lab5
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: lab5-postgres
+    environment:
+      POSTGRES_USER: loyalty
+      POSTGRES_PASSWORD: loyalty
+      POSTGRES_DB: loyalty
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty -d loyalty"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: lab5-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: loyalty
+      RABBITMQ_DEFAULT_PASS: loyalty
+    ports:
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_listener 5672",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 25s
+
+  worker:
+    build: ./worker
+    image: lab5-worker:1.0
+    container_name: lab5-worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://loyalty:loyalty@postgres:5432/loyalty
+      RABBITMQ_URL: amqp://loyalty:loyalty@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  api:
+    build: ./api
+    image: lab5-api:1.0
+    container_name: lab5-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://loyalty:loyalty@postgres:5432/loyalty
+      RABBITMQ_URL: amqp://loyalty:loyalty@rabbitmq:5672/
+    ports:
+      - "8000:8000"
+    depends_on:
+      worker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  notifier:
+    build: ./notifier
+    image: lab5-notifier:1.0
+    container_name: lab5-notifier
+    environment:
+      RABBITMQ_URL: amqp://loyalty:loyalty@rabbitmq:5672/
+      MIN_DELAY_MS: "200"
+      MAX_DELAY_MS: "1500"
+      UNSUBSCRIBED: "C9001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  analytics:
+    build: ./analytics
+    image: lab5-analytics:1.0
+    container_name: lab5-analytics
+    environment:
+      RABBITMQ_URL: amqp://loyalty:loyalty@rabbitmq:5672/
+    ports:
+      - "8002:8002"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
